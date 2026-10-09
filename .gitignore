@@ -1,2 +1,3 @@
 *.csv
 *.properties
+/InventarioAlmoxarifado/target/

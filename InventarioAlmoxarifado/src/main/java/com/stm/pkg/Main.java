@@ -4,10 +4,15 @@
  */
 package com.stm.pkg;
 
+import com.stm.view.TelaPrincipal;
+import javax.swing.SwingUtilities;
+
 /**
  *
  * @author laboratorio
  */
 public class Main {
-    
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new TelaPrincipal().setVisible(true));
+    }
 }
