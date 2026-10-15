@@ -12,15 +12,18 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+
 /**
  *
  * @author laboratorio
  */
 public class ItemDAO {
+
     // Importa ou atualiza vários itens numa única transação
     public void salvarLote(List<Item> itens) throws SQLException {
         String sql = "INSERT INTO item (categoria, nome, quantidade) VALUES (?,?,?) "
-                   + "ON DUPLICATE KEY UPDATE quantidade = VALUES(quantidade)";
+                   + "ON CONFLICT(categoria, nome) DO UPDATE SET "
+                   + "quantidade = excluded.quantidade, atualizado_em = CURRENT_TIMESTAMP";
         try (Connection con = ConnectionFactory.getConnection()) {
             con.setAutoCommit(false);
             try (PreparedStatement ps = con.prepareStatement(sql)) {
@@ -36,6 +39,18 @@ public class ItemDAO {
                 con.rollback();
                 throw e;
             }
+        }
+    }
+
+    // Cadastra um item novo (falha se Categoria + Nome já existirem)
+    public void inserir(String categoria, String nome, int quantidade) throws SQLException {
+        String sql = "INSERT INTO item (categoria, nome, quantidade) VALUES (?,?,?)";
+        try (Connection con = ConnectionFactory.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, categoria);
+            ps.setString(2, nome);
+            ps.setInt(3, quantidade);
+            ps.executeUpdate();
         }
     }
 
@@ -62,8 +77,33 @@ public class ItemDAO {
         return lista;
     }
 
+    public List<String> listarCategorias() throws SQLException {
+        String sql = "SELECT DISTINCT categoria FROM item ORDER BY categoria";
+        List<String> lista = new ArrayList<>();
+        try (Connection con = ConnectionFactory.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                lista.add(rs.getString(1));
+            }
+        }
+        return lista;
+    }
+
+    // Soma (delta positivo) ou subtrai (delta negativo) direto no banco; nunca fica abaixo de 0
+    public void ajustarQuantidade(int id, int delta) throws SQLException {
+        String sql = "UPDATE item SET quantidade = MAX(quantidade + ?, 0), "
+                   + "atualizado_em = CURRENT_TIMESTAMP WHERE id = ?";
+        try (Connection con = ConnectionFactory.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setInt(1, delta);
+            ps.setInt(2, id);
+            ps.executeUpdate();
+        }
+    }
+
     public void atualizarQuantidade(int id, int quantidade) throws SQLException {
-        String sql = "UPDATE item SET quantidade = ? WHERE id = ?";
+        String sql = "UPDATE item SET quantidade = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?";
         try (Connection con = ConnectionFactory.getConnection();
              PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setInt(1, quantidade);
