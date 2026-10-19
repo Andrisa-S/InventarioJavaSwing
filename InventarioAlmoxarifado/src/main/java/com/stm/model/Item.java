@@ -4,6 +4,8 @@
  */
 package com.stm.model;
 
+import java.time.LocalDateTime;
+
 /**
  *
  * @author laboratorio
@@ -13,6 +15,7 @@ public class Item {
     private String categoria;
     private String nome;
     private int quantidade;
+    private LocalDateTime atualizadoEm;   // horário local da última alteração
 
     public Item() {}
 
@@ -24,4 +27,6 @@ public class Item {
     public void setNome(String nome) { this.nome = nome; }
     public int getQuantidade() { return quantidade; }
     public void setQuantidade(int quantidade) { this.quantidade = quantidade; }
+    public LocalDateTime getAtualizadoEm() { return atualizadoEm; }
+    public void setAtualizadoEm(LocalDateTime atualizadoEm) { this.atualizadoEm = atualizadoEm; }
 }

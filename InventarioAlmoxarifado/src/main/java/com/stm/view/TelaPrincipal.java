@@ -10,11 +10,17 @@ package com.stm.view;
  */
 import com.stm.controller.ItemController;
 import com.stm.model.Item;
+import com.stm.util.DataHora;
 import java.awt.BorderLayout;
-import java.awt.Font;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.io.File;
 import java.text.ParseException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.JButton;
@@ -36,8 +42,15 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
 public class TelaPrincipal extends JFrame {
+
+    // Ação executada quando o usuário confirma o formulário de item (novo ou edição)
+    private interface Salvar {
+        void executar(String categoria, String nome, int quantidade) throws Exception;
+    }
+
     private final ItemController controller = new ItemController();
-    private final DefaultTableModel modelo = new DefaultTableModel(new String[]{"Categoria", "Nome", "Qtd."}, 0) {
+    private final DefaultTableModel modelo = new DefaultTableModel(
+            new String[]{"Categoria", "Nome", "Qtd.", "Atualizado em"}, 0) {
         @Override
         public boolean isCellEditable(int row, int col) { return false; }
     };
@@ -48,7 +61,7 @@ public class TelaPrincipal extends JFrame {
     public TelaPrincipal() {
         super("Inventário do Almoxarifado");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(800, 500);
+        setSize(900, 520);
         setLocationRelativeTo(null);
 
         tabela.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -57,15 +70,27 @@ public class TelaPrincipal extends JFrame {
         direita.setHorizontalAlignment(SwingConstants.RIGHT);
         tabela.getColumnModel().getColumn(2).setCellRenderer(direita);
         tabela.getColumnModel().getColumn(2).setMaxWidth(90);
+        tabela.getColumnModel().getColumn(3).setPreferredWidth(160);
+        tabela.getColumnModel().getColumn(3).setMaxWidth(190);
+        tabela.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2 && tabela.getSelectedRow() >= 0) {
+                    editar();   // duplo clique edita o item
+                }
+            }
+        });
 
-        // Topo: busca e importação
+        // Topo: busca, importação e exportação
         JButton btnBuscar = new JButton("Buscar");
         JButton btnImportar = new JButton("Importar CSV");
+        JButton btnExportar = new JButton("Exportar CSV");
         JPanel topo = new JPanel(new FlowLayout(FlowLayout.LEFT));
         topo.add(new JLabel("Busca:"));
         topo.add(campoBusca);
         topo.add(btnBuscar);
         topo.add(btnImportar);
+        topo.add(btnExportar);
 
         // Rodapé: ações sobre o item selecionado
         JButton btnMenos = new JButton("-");
@@ -77,6 +102,8 @@ public class TelaPrincipal extends JFrame {
         btnMais.setToolTipText("Aumentar 1 unidade do item selecionado");
         JButton btnDefinir = new JButton("Definir qtd...");
         JButton btnNovo = new JButton("Novo item");
+        JButton btnEditar = new JButton("Editar");
+        btnEditar.setToolTipText("Também funciona com duplo clique na linha");
         JButton btnExcluir = new JButton("Excluir");
 
         JPanel rodape = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -85,6 +112,7 @@ public class TelaPrincipal extends JFrame {
         rodape.add(btnDefinir);
         rodape.add(new JLabel("     "));
         rodape.add(btnNovo);
+        rodape.add(btnEditar);
         rodape.add(btnExcluir);
 
         add(topo, BorderLayout.NORTH);
@@ -94,10 +122,12 @@ public class TelaPrincipal extends JFrame {
         btnBuscar.addActionListener(e -> carregar(null));
         campoBusca.addActionListener(e -> carregar(null));
         btnImportar.addActionListener(e -> importar());
+        btnExportar.addActionListener(e -> exportar());
         btnMais.addActionListener(e -> ajustar(1));
         btnMenos.addActionListener(e -> ajustar(-1));
         btnDefinir.addActionListener(e -> definirQuantidade());
         btnNovo.addActionListener(e -> novoItem());
+        btnEditar.addActionListener(e -> editar());
         btnExcluir.addActionListener(e -> excluir());
 
         carregar(null);
@@ -111,7 +141,8 @@ public class TelaPrincipal extends JFrame {
             int linhaSelecionar = -1;
             for (int r = 0; r < itensExibidos.size(); r++) {
                 Item i = itensExibidos.get(r);
-                modelo.addRow(new Object[]{i.getCategoria(), i.getNome(), i.getQuantidade()});
+                modelo.addRow(new Object[]{i.getCategoria(), i.getNome(), i.getQuantidade(),
+                    DataHora.formatar(i.getAtualizadoEm())});
                 if (idSelecionar != null && i.getId() == idSelecionar) {
                     linhaSelecionar = r;
                 }
@@ -132,6 +163,13 @@ public class TelaPrincipal extends JFrame {
             return null;
         }
         return itensExibidos.get(linha);
+    }
+
+    private boolean estaNaLista(int id) {
+        for (Item i : itensExibidos) {
+            if (i.getId() == id) return true;
+        }
+        return false;
     }
 
     private void ajustar(int delta) {
@@ -167,6 +205,39 @@ public class TelaPrincipal extends JFrame {
     }
 
     private void novoItem() {
+        String[] criado = new String[2];   // categoria e nome, para selecionar o item depois
+        boolean salvou = abrirFormulario("Novo item", null, (categoria, nome, qtd) -> {
+            controller.adicionarItem(categoria, nome, qtd);
+            criado[0] = categoria;
+            criado[1] = nome;
+        });
+        if (salvou) {
+            campoBusca.setText("");   // garante que o novo item apareça na lista
+            carregar(null);
+            selecionarPorNome(criado[0], criado[1]);
+        }
+    }
+
+    private void editar() {
+        Item item = itemSelecionado();
+        if (item == null) return;
+        boolean salvou = abrirFormulario("Editar item", item,
+                (categoria, nome, qtd) -> controller.editarItem(item.getId(), categoria, nome, qtd));
+        if (salvou) {
+            carregar(item.getId());
+            if (!estaNaLista(item.getId())) {   // o filtro de busca escondeu o item editado
+                campoBusca.setText("");
+                carregar(item.getId());
+            }
+        }
+    }
+
+    /**
+     * Formulário usado para criar e para editar. Se "inicial" for nulo, os campos
+     * começam vazios. Repete a janela enquanto houver erro de validação.
+     * Retorna true se o item foi salvo.
+     */
+    private boolean abrirFormulario(String titulo, Item inicial, Salvar salvar) {
         JComboBox<String> cbCategoria = new JComboBox<>();
         cbCategoria.setEditable(true);
         try {
@@ -175,24 +246,25 @@ public class TelaPrincipal extends JFrame {
             }
         } catch (Exception ex) {
             mostrarErro(ex);
-            return;
+            return false;
         }
-        cbCategoria.setSelectedItem("");
-        JTextField tfNome = new JTextField(20);
-        JSpinner spQtd = new JSpinner(new SpinnerNumberModel(0, 0, 1_000_000, 1));
+        cbCategoria.setSelectedItem(inicial == null ? "" : inicial.getCategoria());
+        JTextField tfNome = new JTextField(inicial == null ? "" : inicial.getNome(), 20);
+        int qtdInicial = inicial == null ? 0 : inicial.getQuantidade();
+        JSpinner spQtd = new JSpinner(new SpinnerNumberModel(qtdInicial, 0, Integer.MAX_VALUE, 1));
 
         JPanel painel = new JPanel(new GridLayout(0, 2, 6, 6));
         painel.add(new JLabel("Categoria:"));
         painel.add(cbCategoria);
         painel.add(new JLabel("Nome:"));
         painel.add(tfNome);
-        painel.add(new JLabel("Quantidade inicial:"));
+        painel.add(new JLabel(inicial == null ? "Quantidade inicial:" : "Quantidade:"));
         painel.add(spQtd);
 
         while (true) {
-            int opcao = JOptionPane.showConfirmDialog(this, painel, "Novo item",
+            int opcao = JOptionPane.showConfirmDialog(this, painel, titulo,
                     JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-            if (opcao != JOptionPane.OK_OPTION) return;
+            if (opcao != JOptionPane.OK_OPTION) return false;
             try {
                 spQtd.commitEdit();
             } catch (ParseException ignorado) {
@@ -203,16 +275,13 @@ public class TelaPrincipal extends JFrame {
             String nome = tfNome.getText().trim();
             int qtd = ((Number) spQtd.getValue()).intValue();
             try {
-                controller.adicionarItem(categoria, nome, qtd);
-                campoBusca.setText("");   // garante que o novo item apareça na lista
-                carregar(null);
-                selecionarPorNome(categoria, nome);
-                return;
+                salvar.executar(categoria, nome, qtd);
+                return true;
             } catch (IllegalArgumentException ex) {
                 JOptionPane.showMessageDialog(this, ex.getMessage(), "Atenção", JOptionPane.WARNING_MESSAGE);
             } catch (Exception ex) {
                 mostrarErro(ex);
-                return;
+                return false;
             }
         }
     }
@@ -251,6 +320,33 @@ public class TelaPrincipal extends JFrame {
             int n = controller.importarPlanilha(fc.getSelectedFile());
             JOptionPane.showMessageDialog(this, n + " itens importados/atualizados.");
             carregar(null);
+        } catch (Exception ex) {
+            mostrarErro(ex);
+        }
+    }
+
+    private void exportar() {
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("Exportar inventário");
+        fc.setFileFilter(new FileNameExtensionFilter("Arquivos CSV (*.csv)", "csv"));
+        String sugestao = "inventario_almoxarifado_"
+                + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm")) + ".csv";
+        fc.setSelectedFile(new File(sugestao));
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+
+        File destino = fc.getSelectedFile();
+        if (!destino.getName().toLowerCase().endsWith(".csv")) {
+            destino = new File(destino.getParentFile(), destino.getName() + ".csv");
+        }
+        if (destino.exists()) {
+            int opcao = JOptionPane.showConfirmDialog(this,
+                    "O arquivo \"" + destino.getName() + "\" já existe. Substituir?",
+                    "Confirmar", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (opcao != JOptionPane.YES_OPTION) return;
+        }
+        try {
+            int n = controller.exportarCsv(destino);
+            JOptionPane.showMessageDialog(this, n + " itens exportados para:\n" + destino.getAbsolutePath());
         } catch (Exception ex) {
             mostrarErro(ex);
         }
